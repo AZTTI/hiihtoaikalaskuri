@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Hiihtokilpailun Ajanotto</title>
+  <style>
+    * { box-sizing: border-box; margin:0; padding:0; }
+    body {
+      font-family: -apple-system, sans-serif;
+      background: linear-gradient(180deg, #6eb5ff 0%, #2d8cff 100%);
+      color: white;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+    }
+    .header { display: flex; align-items: center; margin-bottom: 8px; }
+    .header .circle {
+      width: 24px; height:24px;
+      border:2px solid white;
+      border-radius:50%;
+      margin-right:8px;
+    }
+    h1 { font-size: 1.25rem; font-weight: 600; }
+    #timer {
+      font-size: 3rem;
+      font-variant-numeric: tabular-nums;
+      margin: 12px 0;
+    }
+    button {
+      background: #007aff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: white;
+      font-size: 1rem;
+      margin: 4px;
+      cursor: pointer;
+    }
+    button.secondary { background: #4a90e2; }
+    button.danger   { background: #e74c3c; }
+    button.purple   { background: #8e44ad; }
+    .controls, .modes { display: flex; flex-wrap: wrap; justify-content: center; }
+    .modes button { flex:1; max-width:120px; }
+    .panel { width:100%; background: rgba(255,255,255,0.1); border-radius:8px; margin:8px 0; padding:8px; }
+    .panel h2 { margin-bottom:4px; font-size:1rem; }
+    .panel .entries { max-height:120px; overflow-y:auto; margin-top:4px; }
+    .entries div { display:flex; justify-content:space-between; padding:2px 0; }
+    .entries div + div { border-top:1px solid rgba(255,255,255,0.2); }
+    input[type=text] {
+      width:60px;
+      padding:4px;
+      border-radius:4px;
+      border:none;
+      margin-right:4px;
+      text-align:center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="circle"></div>
+    <h1>Hiihtokilpailun Ajanotto</h1>
+  </div>
+
+  <div id="timer">00:00</div>
+
+  <div class="controls">
+    <button id="startPause">Käynnistä</button>
+    <button id="reset" class="secondary">Nollaa</button>
+    <button id="clearAll" class="danger">Tyhjennä</button>
+  </div>
+
+  <div class="modes">
+    <button data-mode="0" class="mode active">Yhteislähtö</button>
+    <button data-mode="1" class="mode">Väliaika</button>
+  </div>
+
+  <div id="intervalSettings" style="display:none; text-align:center; margin-top:8px;">
+    Lähtöväli (s):
+    <button data-interval="15">15</button>
+    <button data-interval="20">20</button>
+    <button data-interval="30">30</button>
+  </div>
+
+  <div id="splitsContainer"></div>
+
+  <button id="showResults" class="purple" style="margin-top:8px;">Tulokset</button>
+
+  <script>
+  (() => {
+    let seconds = 0;
+    let timerRunning = false;
+    let mode = 0;
+    let intervalSec = 30;
+    let splitData = Array(4).fill().map(() => []);
+
+    const el = id => document.getElementById(id);
+
+    function formatTime(s){
+      const m = Math.floor(s/60), sec = s%60;
+      return `${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
+    }
+
+    function updateTimer(){
+      el('timer').textContent = formatTime(seconds);
+    }
+
+    el('startPause').onclick = ()=>{
+      timerRunning = !timerRunning;
+      el('startPause').textContent = timerRunning ? 'Pysäytä' : 'Käynnistä';
+    };
+    el('reset').onclick = ()=>{ timerRunning=false; seconds=0; updateTimer(); };
+    el('clearAll').onclick = ()=>{
+      timerRunning=false; seconds=0;
+      splitData = splitData.map(()=>[]);
+      updateUI();
+    };
+
+    document.querySelectorAll('.mode').forEach(btn=>{
+      btn.onclick = ()=>{
+        mode = +btn.dataset.mode;
+        document.querySelectorAll('.mode').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        el('intervalSettings').style.display = mode===1 ? 'block':'none';
+        updateUI();
+      };
+    });
+
+    document.querySelectorAll('#intervalSettings button').forEach(b=>{
+      b.onclick = ()=>{ intervalSec = +b.dataset.interval; updateIntervalButtons(); };
+    });
+    function updateIntervalButtons(){
+      document.querySelectorAll('#intervalSettings button').forEach(b=>{
+        b.style.opacity = (b.dataset.interval==intervalSec? '1':'0.5');
+      });
+    }
+
+    const sc = el('splitsContainer');
+    function buildSplits(){
+      sc.innerHTML = '';
+      splitData.forEach((entries,i)=>{
+        const panel = document.createElement('div');
+        panel.className='panel';
+        panel.innerHTML = `
+          <h2>${i<3?`Väliaika ${i+1}`:'Maalilinja'}</h2>
+          <div>
+            <input id="num${i}" type="text" placeholder="Nr">
+            <button id="add${i}">Lisää</button>
+            <button id="man${i}">Syötä käsin</button>
+          </div>
+          <div class="entries" id="list${i}"></div>
+        `;
+        sc.appendChild(panel);
+
+        panel.querySelector('#add'+i).onclick = ()=>{
+          const val = panel.querySelector('#num'+i).value.trim();
+          if(!val) return;
+          const bib = parseInt(val,10);
+          if(isNaN(bib)) { alert('Virheellinen numero'); return; }
+          if(mode===1 && seconds < (bib-1)*intervalSec){
+            alert('Kilpailija ei ole vielä lähtenyt');
+            return;
+          }
+          const offset = mode===1 ? (bib-1)*intervalSec : 0;
+          const net = seconds - offset;
+          splitData[i].push({number:val, time: net});
+          panel.querySelector('#num'+i).value='';
+          renderPanel(i);
+        };
+        panel.querySelector('#man'+i).onclick = ()=>{
+          const m = prompt('Numero?'), t = prompt('Aika mm:ss');
+          if(m && t){ const [mm,ss]=t.split(':').map(Number);
+            splitData[i].push({number:m, time:mm*60+ss}); renderPanel(i); }
+        };
+      });
+    }
+
+    function renderPanel(i){
+      const listEl = el('list'+i);
+      listEl.innerHTML = '';
+      splitData[i].sort((a,b)=>a.time-b.time).forEach(e=>{
+        const row = document.createElement('div');
+        row.innerHTML = `<span>#${e.number} (${formatTime(e.time)})</span>
+                         <button style="opacity:.7">🗑</button>`;
+        row.querySelector('button').onclick = ()=>{
+          splitData[i] = splitData[i].filter(x=>x!==e);
+          renderPanel(i);
+        };
+        listEl.appendChild(row);
+      });
+    }
+
+    el('showResults').onclick = ()=>{
+      const parts = splitData.map((entries,i)=>{
+        const header = i<3?`Väliaika ${i+1}`:'Maalilinja';
+        if(entries.length===0) return header + '\nEi tuloksia';
+        const lines = entries.sort((a,b)=>a.time-b.time)
+          .map(e=>`#${e.number} ${formatTime(e.time)}`);
+        return header + '\n' + lines.join('\n');
+      });
+      alert(parts.join('\n\n'));
+    };
+
+    function updateUI(){
+      buildSplits(); updateIntervalButtons(); updateTimer();
+    }
+
+    setInterval(()=>{ if(timerRunning){ seconds++; updateTimer(); } },1000);
+    updateUI();
+  })();
+  </script>
+</body>
+</html>
